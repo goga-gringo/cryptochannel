@@ -35,6 +35,10 @@ MAX_CHARS = int(env("MAX_CHARS", "350"))  # длина выдержки из н�
 FEEDS_FILE = Path(env("FEEDS_FILE", str(BASE_DIR / "feeds.txt")))
 DB_PATH = env("DB_PATH", str(BASE_DIR / "posted.db"))
 DRY_RUN = env("DRY_RUN", "0") == "1"  # 1 = только показать пост в логе, ничего не отправлять
+# Хештеги в конце поста: подбираются по теме новости (правила ниже, HASHTAG_RULES).
+MAX_HASHTAGS = 4  # сколько хештегов ставить под постом; 0 отключает их совсем
+ALWAYS_TAG = "#crypto"  # ставится первым в каждом посте ("" = не ставить)
+FALLBACK_TAGS = ["#bitcoin", "#altcoin", "#telegram", "#blockchain"]  # добирают до нужного числа
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("news_bot")
@@ -71,6 +75,44 @@ EMOJI_RULES = [
     (("кино", "фильм", "сериал", "музык", "концерт", "премьер", "оскар"), "🎬"),
 ]
 DEFAULT_EMOJI = "📰"
+
+# Фразы, которые не считаются при подборе хештегов (иначе «прямой эфир» дал бы #ethereum).
+HASHTAG_IGNORE = ["прямой эфир", "прямого эфира", "прямом эфире", "в эфире", "в эфир"]
+
+# Хештеги по ключевым словам. Новость может подойти под несколько правил, берутся первые
+# совпадения (сначала по заголовку, потом по описанию), всего не больше MAX_HASHTAGS.
+# Слова пишите в нижнем регистре; знаки препинания при сравнении игнорируются.
+HASHTAG_RULES = [
+    (("биткоин", "bitcoin", "btc"), ["#bitcoin", "#btc"]),
+    (("эфир", "эфира", "эфиру", "эфиром", "эфириум", "ethereum", "eth"), ["#ethereum", "#eth"]),
+    (("solana", "солана", "sol"), ["#solana"]),
+    (("xrp", "ripple", "рипл"), ["#xrp", "#ripple"]),
+    (("toncoin", "ton", "тонкоин"), ["#ton", "#toncoin"]),
+    (("bnb", "bnb chain"), ["#bnb"]),
+    (("cardano", "кардано", "ada"), ["#cardano"]),
+    (("dogecoin", "доджкоин", "shiba", "мем коин", "мемкоин", "memecoin", "мемкоины"), ["#memecoins"]),
+    (("стейблкоин", "стейблкоины", "stablecoin", "usdt", "usdc", "tether", "тезер"), ["#stablecoins"]),
+    (("etf", "blackrock", "fidelity", "грейскейл", "grayscale"), ["#etf", "#institutions"]),
+    (("цифровой рубль", "cbdc", "цифровая валюта центробанка"), ["#cbdc"]),
+    (("sec", "регулятор", "регулирование", "законопроект", "закон", "запрет", "лицензия",
+      "лицензию", "суд", "суда", "суде", "судебный", "обвинения", "обвинил", "иск"), ["#regulation", "#law"]),
+    (("взлом", "взломали", "взломан", "хакер", "хакеры", "украли", "украл", "кража", "утечка",
+      "уязвимость", "эксплойт", "мошенники", "мошенничество", "скам", "hack", "exploit"), ["#security", "#hack"]),
+    (("binance", "бинанс"), ["#binance", "#exchange"]),
+    (("coinbase", "кобейс"), ["#coinbase", "#exchange"]),
+    (("bybit", "okx", "kraken", "kucoin", "bitget", "биржа", "биржи", "бирже", "листинг", "делистинг"), ["#exchange"]),
+    (("defi", "децентрализованные", "децентрализованный", "ликвидность", "протокол"), ["#defi"]),
+    (("стейкинг", "стейкинга", "staking", "рестейкинг"), ["#staking"]),
+    (("nft", "нфт"), ["#nft"]),
+    (("майнинг", "майнинга", "майнер", "майнеры", "хешрейт", "халвинг"), ["#mining"]),
+    (("airdrop", "эирдроп", "аирдроп", "аирдропа"), ["#airdrop"]),
+    (("kalshi", "polymarket", "рынки предсказаний", "рынков предсказаний"), ["#predictionmarkets"]),
+    (("нейросеть", "нейросети", "искусственный интеллект", "ии", "openai", "chatgpt"), ["#ai"]),
+    (("telegram", "телеграм", "телеграма", "дуров", "дурова"), ["#telegram"]),
+    (("фрс", "fed", "инфляция", "инфляции", "ставка", "ставки", "доллар", "доллара"), ["#economy", "#macro"]),
+    (("упал", "упали", "падение", "обвал", "просел", "рухнул", "вырос", "выросла", "рекорд",
+      "ралли", "взлет", "взлёт", "курс", "цена", "котировки", "минимум"), ["#market", "#price"]),
+]
 
 
 # ---------- хранилище ----------
@@ -210,6 +252,44 @@ def pick_emoji(title: str) -> str:
     return DEFAULT_EMOJI
 
 
+def _norm(text: str) -> str:
+    """Нижний регистр, знаки препинания заменены пробелами, пробелы по краям."""
+    return " " + re.sub(r"[\W_]+", " ", text.lower()).strip() + " "
+
+
+def pick_hashtags(item: dict) -> list[str]:
+    """Хештеги по теме новости: #crypto, затем по правилам (заголовок важнее описания), затем добор."""
+    if MAX_HASHTAGS <= 0:
+        return []
+    tags: list[str] = [ALWAYS_TAG] if ALWAYS_TAG else []
+
+    def add(tag: str) -> None:
+        if tag not in tags and len(tags) < MAX_HASHTAGS:
+            tags.append(tag)
+
+    sources = []
+    for text in (item["title"], item.get("summary", "")):
+        norm = _norm(text)
+        for phrase in HASHTAG_IGNORE:  # фразы, которые только похожи на крипто-слова
+            norm = norm.replace(_norm(phrase), " ")
+        sources.append(norm)
+    matched = [
+        rule_tags
+        for source in sources
+        for keywords, rule_tags in HASHTAG_RULES
+        if any(_norm(k) in source for k in keywords)
+    ]
+    # Сначала по одному главному хештегу от каждого сработавшего правила (так тем больше),
+    # и только если место осталось, добавляются вторые хештеги правил.
+    for position in (0, 1):
+        for rule_tags in matched:
+            if position < len(rule_tags):
+                add(rule_tags[position])
+    for tag in FALLBACK_TAGS:
+        add(tag)
+    return tags
+
+
 def format_post(item: dict) -> str:
     title = html.escape(item["title"])
     summary = item["summary"]
@@ -220,6 +300,9 @@ def format_post(item: dict) -> str:
     parts = [f"{pick_emoji(item['title'])} <b>{title}</b>"]
     if body:
         parts.append(body)
+    tags = pick_hashtags(item)
+    if tags:
+        parts.append(html.escape(" ".join(tags)))
     return "\n\n".join(parts)
 
 

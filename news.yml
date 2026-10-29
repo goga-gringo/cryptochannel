@@ -1,0 +1,55 @@
+name: Daily news post
+
+on:
+  schedule:
+    # Раз в сутки в 05:07 UTC (10:07 по Екатеринбургу). Время можно поменять.
+    - cron: "7 5 * * *"
+  workflow_dispatch: # кнопка ручного запуска во вкладке Actions
+    inputs:
+      dry_run:
+        description: "Пробный запуск: показать пост в логе, ничего не отправлять в канал"
+        type: boolean
+        default: false
+
+# Чтобы два запуска не работали одновременно и не портили posted.db
+concurrency:
+  group: news-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write # нужно, чтобы сохранить posted.db обратно в репозиторий
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Post news
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          # Необязательные настройки: Settings -> Secrets and variables -> Actions -> Variables
+          POSTS_PER_RUN: ${{ vars.POSTS_PER_RUN }}
+          MAX_AGE_HOURS: ${{ vars.MAX_AGE_HOURS }}
+          MAX_CHARS: ${{ vars.MAX_CHARS }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: python bot.py --once
+
+      - name: Save list of published links
+        run: |
+          if [ -n "$(git status --porcelain posted.db)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add posted.db
+            git commit -m "Update posted.db"
+            git push
+          fi

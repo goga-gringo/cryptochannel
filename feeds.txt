@@ -1,0 +1,16 @@
+# Список RSS-лент, по одной на строку. Всё после # игнорируется.
+# Бот берёт новости по очереди из разных лент. Нерабочая лента просто пропускается
+# (предупреждение появится в логе), так что можно смело добавлять и удалять строки.
+# Чтобы найти ленту любого сайта, ищите на нём значок RSS или адрес вида /rss, /feed.
+
+# --- Мир и политика (русский язык) ---
+https://feeds.bbci.co.uk/russian/rss.xml   # BBC Русская служба
+https://rss.dw.com/rdf/rss-ru-all          # Deutsche Welle
+
+# --- Технологии (русский язык) ---
+https://habr.com/ru/rss/news/              # Хабр Новости
+
+# --- Примеры на английском, раскомментируйте при желании ---
+# https://feeds.arstechnica.com/arstechnica/index   # Ars Technica
+# https://www.theverge.com/rss/index.xml            # The Verge
+# https://feeds.bbci.co.uk/news/world/rss.xml       # BBC World

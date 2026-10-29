@@ -6,7 +6,6 @@
 # --- Крипто (русский язык) ---
 https://forklog.com/feed                    # ForkLog
 https://bits.media/rss2/                    # Bits.media
-https://ru.cointelegraph.com/rss            # Cointelegraph Russia
 
 # --- Крипто (английский язык), раскомментируйте при желании ---
 # https://cointelegraph.com/rss                              # Cointelegraph

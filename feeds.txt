@@ -3,14 +3,12 @@
 # (предупреждение появится в логе), так что можно смело добавлять и удалять строки.
 # Чтобы найти ленту любого сайта, ищите на нём значок RSS или адрес вида /rss, /feed.
 
-# --- Мир и политика (русский язык) ---
-https://feeds.bbci.co.uk/russian/rss.xml   # BBC Русская служба
-https://rss.dw.com/rdf/rss-ru-all          # Deutsche Welle
+# --- Крипто (русский язык) ---
+https://forklog.com/feed                    # ForkLog
+https://bits.media/rss2/                    # Bits.media
+https://ru.cointelegraph.com/rss            # Cointelegraph Russia
 
-# --- Технологии (русский язык) ---
-https://habr.com/ru/rss/news/              # Хабр Новости
-
-# --- Примеры на английском, раскомментируйте при желании ---
-# https://feeds.arstechnica.com/arstechnica/index   # Ars Technica
-# https://www.theverge.com/rss/index.xml            # The Verge
-# https://feeds.bbci.co.uk/news/world/rss.xml       # BBC World
+# --- Крипто (английский язык), раскомментируйте при желании ---
+# https://cointelegraph.com/rss                              # Cointelegraph
+# https://decrypt.co/feed                                    # Decrypt
+# https://www.coindesk.com/arc/outboundfeeds/rss             # CoinDesk

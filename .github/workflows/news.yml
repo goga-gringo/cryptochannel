@@ -3,7 +3,7 @@ name: Daily news post
 on:
   schedule:
     # Раз в сутки в 05:07 UTC (10:07 по Екатеринбургу). Время можно поменять.
-    - cron: "7 5 * * *"
+    - cron: "25 6 * * *"
   workflow_dispatch: # кнопка ручного запуска во вкладке Actions
     inputs:
       dry_run:

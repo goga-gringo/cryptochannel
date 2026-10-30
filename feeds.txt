@@ -6,6 +6,10 @@
 # --- Крипто (русский язык) ---
 https://forklog.com/feed                    # ForkLog
 https://bits.media/rss2/                    # Bits.media
+https://cryptonews.net/ru/news/feed/        # Cryptonews (рус.)
+https://coinspot.io/feed/                   # CoinSpot
+https://incrypted.com/feed/                 # Incrypted
+https://ru.beincrypto.com/feed/             # BeInCrypto (рус.)
 
 # --- Крипто (английский язык), раскомментируйте при желании ---
 # https://cointelegraph.com/rss                              # Cointelegraph

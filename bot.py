@@ -214,6 +214,43 @@ def posted_title_keys(limit: int = 500) -> set[str]:
     return {title_key(r[0]) for r in rows if r[0]}
 
 
+# Слова, которые встречаются в каждой второй крипто-новости: по ним темы не различаем.
+GENERIC_NAMES = {
+    "bitcoin", "биткоин", "ethereum", "эфир", "crypto", "крипт", "defi", "nft", "web3", "usdt",
+    "usdc", "etf", "сша", "росси", "китай", "украи", "евро", "долла", "the", "this", "that",
+    "what", "why", "how", "new", "after", "will", "says", "could", "with", "from", "more",
+}
+GENERIC_STEMS = {g[:5] for g in GENERIC_NAMES}
+RECENT_POSTS_FOR_TOPICS = 6  # сколько последних постов учитываем при сравнении тем
+
+
+def entities(title: str) -> set[str]:
+    """Имена в заголовке (компании, проекты, люди): слова с заглавной буквы не в начале
+    фразы, а также латинское слово в самом начале. Сравниваются по первым 5 буквам."""
+    words = re.findall(r"[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9\-]*", title)
+    names = set()
+    for i, word in enumerate(words):
+        if len(word) < 3:
+            continue
+        is_latin = bool(re.fullmatch(r"[A-Za-z0-9\-]+", word))
+        is_name = (i > 0 and word[0].isupper()) or (i == 0 and is_latin and len(word) >= 4)
+        stem = word.lower()[:5]
+        if is_name and stem not in GENERIC_STEMS:
+            names.add(stem)
+    return names
+
+
+def recent_entities() -> set[str]:
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT title FROM posted ORDER BY ts DESC LIMIT ?", (RECENT_POSTS_FOR_TOPICS,)
+        ).fetchall()
+    names: set[str] = set()
+    for (title,) in rows:
+        names |= entities(title or "")
+    return names
+
+
 def pick_items(feeds: list[str]) -> list[dict]:
     """Берёт самые свежие ещё не опубликованные новости, по очереди из разных лент."""
     now = time.time()
@@ -227,7 +264,11 @@ def pick_items(feeds: list[str]) -> list[dict]:
         ]
         per_feed.append(fresh)
     # Та же новость из другой ленты (совпадает заголовок) не публикуется повторно.
+    # Новости про ту же компанию/проект, что в последних постах, откладываются: берутся
+    # другие, а отложенные идут в дело, только если ничего другого нет.
     result, seen_titles = [], posted_title_keys()
+    recent_names = recent_entities()
+    deferred = []
     while len(result) < POSTS_PER_RUN and any(per_feed):
         for lst in per_feed:
             while lst:
@@ -236,10 +277,18 @@ def pick_items(feeds: list[str]) -> list[dict]:
                 if key in seen_titles:
                     continue
                 seen_titles.add(key)
+                names = entities(item["title"])
+                if names & recent_names:
+                    deferred.append(item)
+                    continue
+                recent_names |= names
                 result.append(item)
                 break
             if len(result) >= POSTS_PER_RUN:
                 break
+    if len(result) < POSTS_PER_RUN and deferred:
+        log.info("Свежих новостей на другие темы не нашлось, беру из отложенных")
+        result += deferred[: POSTS_PER_RUN - len(result)]
     return result
 
 

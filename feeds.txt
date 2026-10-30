@@ -1,14 +1,30 @@
 # Список RSS-лент, по одной на строку. Всё после # игнорируется.
-# Бот берёт новости по очереди из разных лент. Нерабочая лента просто пропускается
-# (предупреждение появится в логе), так что можно смело добавлять и удалять строки.
-# Чтобы найти ленту любого сайта, ищите на нём значок RSS или адрес вида /rss, /feed.
+# Бот каждый раз начинает с другой ленты по кругу, так что новости идут из разных источников.
+# Нерабочая лента просто пропускается (предупреждение появится в логе), поэтому строки можно
+# смело добавлять и удалять. Чтобы найти ленту любого сайта, ищите на нём значок RSS
+# или адрес вида /rss, /feed.
 
-# --- Крипто (русский язык) ---
+# --- Крипто, общие (русский язык) ---
 https://forklog.com/feed                    # ForkLog
 https://bits.media/rss2/                    # Bits.media
 https://coinspot.io/feed/                   # CoinSpot
 https://incrypted.com/feed/                 # Incrypted
 https://ru.beincrypto.com/feed/             # BeInCrypto (рус.)
+
+# --- Telegram / TON / Gram (русский язык) ---
+# Ленты по тегам тех же сайтов. Не все адреса могут существовать: нерабочие пропускаются,
+# после пробного запуска (dry_run) смотрите в логе, какие ответили, и лишние удаляйте.
+https://coinspot.io/tag/telegram/feed/      # CoinSpot: тег Telegram
+https://coinspot.io/tag/ton/feed/           # CoinSpot: тег TON
+https://coinspot.io/tag/toncoin/feed/       # CoinSpot: тег Toncoin
+https://ru.beincrypto.com/tag/toncoin/feed/ # BeInCrypto: тег Toncoin
+https://forklog.com/tag/telegram/feed       # ForkLog: тег Telegram
+https://forklog.com/tag/toncoin/feed        # ForkLog: тег Toncoin
+
+# Поиск по новостям Google (работает для любой темы, заголовки без описания).
+# Запрос задаётся после q=, слова через +, фразы в кавычках %22...%22.
+https://news.google.com/rss/search?q=Toncoin+OR+Gram+OR+%22TON+blockchain%22+Telegram&hl=ru&gl=RU&ceid=RU:ru
+https://news.google.com/rss/search?q=%D0%94%D1%83%D1%80%D0%BE%D0%B2+Telegram+TON&hl=ru&gl=RU&ceid=RU:ru
 
 # --- Крипто (английский язык), раскомментируйте при желании ---
 # https://cointelegraph.com/rss                              # Cointelegraph

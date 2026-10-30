@@ -77,7 +77,8 @@ EMOJI_RULES = [
     (("нейросет", "искусственн", " ии ", "chatgpt", "openai", "claude", "anthropic", "gemini", "grok",
       "deepseek", " llm ", " ai ", "gpt", "агента ", "агент ", "агенты ", "агентов ", "робот"),
      ["🤖", "🧠", "🦾", "✨"]),
-    (("telegram", "телеграм", "дуров", " ton ", "toncoin"), ["📲", "✈️", "💬"]),
+    (("telegram", "телеграм", "дуров", " ton ", "toncoin", " gram ", " грам ", " грама ", " граму ",
+      " грамом "), ["📲", "💎", "✈️", "💬"]),
     (("партнерств", "партнёрств", "сотрудничеств", "альянс", "объединя"), ["🤝", "🔗"]),
     (("инвестиц", "раунд", "привлек", "млрд", "венчур"), ["💰", "💸", "🏦"]),
     (("конференц", "саммит", "форум", "митап"), ["🎤", "🗓️", "🏟️"]),
@@ -122,7 +123,7 @@ HASHTAG_RULES = [
     (("эфир", "эфира", "эфиру", "эфиром", "эфириум", "ethereum", "eth"), ["#ethereum", "#eth"]),
     (("solana", "солана", "sol"), ["#solana"]),
     (("xrp", "ripple", "рипл"), ["#xrp", "#ripple"]),
-    (("toncoin", "ton", "тонкоин"), ["#ton", "#toncoin"]),
+    (("toncoin", "ton", "тонкоин", "gram", "грам", "грама", "граму", "грамом"), ["#ton", "#gram"]),
     (("bnb", "bnb chain"), ["#bnb"]),
     (("cardano", "кардано", "ada"), ["#cardano"]),
     (("dogecoin", "доджкоин", "shiba", "мем коин", "мемкоин", "memecoin", "мемкоины"), ["#memecoins"]),
@@ -243,6 +244,10 @@ def fetch_feed(url: str) -> list[dict]:
         if not link or not title:
             continue
         summary = clean_text(e.get("summary") or e.get("description") or "")
+        if "news.google.com" in url:
+            # Заголовки там вида «Текст - Название издания», а описание — только ссылки.
+            title = re.sub(r"\s+[-–—]\s+[^-–—]{2,60}$", "", title)
+            summary = ""
         items.append(
             {"title": title, "summary": summary, "url": link, "ts": entry_time(e), "source": source}
         )
@@ -264,6 +269,8 @@ def posted_title_keys(limit: int = 500) -> set[str]:
 
 # Слова, которые встречаются в каждой второй крипто-новости: по ним темы не различаем.
 GENERIC_NAMES = {
+    # темы самого канала: новости про них должны идти регулярно, не раз в 6 постов
+    "telegram", "телеграм", "ton", "toncoin", "gram", "грам", "дуров",
     "bitcoin", "биткоин", "ethereum", "эфир", "crypto", "крипт", "defi", "nft", "web3", "usdt",
     "usdc", "etf", "сша", "росси", "китай", "украи", "евро", "долла", "the", "this", "that",
     "what", "why", "how", "new", "after", "will", "says", "could", "with", "from", "more",
@@ -311,6 +318,13 @@ def pick_items(feeds: list[str]) -> list[dict]:
             and (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600)
         ]
         per_feed.append(fresh)
+    # Начинаем с другой ленты каждый раз (по числу уже опубликованных постов), иначе при
+    # одном посте в сутки всегда выигрывала бы первая лента списка.
+    if per_feed:
+        with db() as conn:
+            posted_count = conn.execute("SELECT COUNT(*) FROM posted").fetchone()[0]
+        start = posted_count % len(per_feed)
+        per_feed = per_feed[start:] + per_feed[:start]
     # Та же новость из другой ленты (совпадает заголовок) не публикуется повторно.
     # Новости про ту же компанию/проект, что в последних постах, откладываются: берутся
     # другие, а отложенные идут в дело, только если ничего другого нет.

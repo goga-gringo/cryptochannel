@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from calendar import timegm
 from pathlib import Path
 
@@ -43,38 +44,72 @@ FALLBACK_TAGS = ["#bitcoin", "#altcoin", "#telegram", "#blockchain"]  # доби
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("news_bot")
 
-# Эмодзи по ключевым словам в заголовке (первое совпадение). Список можно дополнять.
+# Эмодзи под заголовком. Для каждой темы есть несколько подходящих эмодзи (EMOJI_RULES).
+# Бот берёт первое подходящее, которое НЕ использовалось в последних EMOJI_NO_REPEAT постах.
+# Если все подходящие по теме недавно были, берётся любое свободное из общего набора
+# GENERAL_EMOJI. Так одно и то же эмодзи не повторяется раньше, чем через 10 постов.
+EMOJI_NO_REPEAT = 10
+
 EMOJI_RULES = [
     # --- крипто: сначала события (суд, взлом, рост, падение), потом общие темы ---
     ((" суд ", " суда ", " суде ", "судебн", "судья", "обвинен", "обвинил", "прокуратур", "иск к ",
-      "приговор", "штраф", "арестов", "регулятор", " sec ", "lawsuit", "charged"), "⚖️"),
+      "приговор", "штраф", "арестов", "регулятор", " sec ", "lawsuit", "charged"), ["⚖️", "📜", "🔨"]),
     (("взлом", "хакер", "украл", "украд", "кража", "утечк", "уязвимост", "эксплойт", "мошенн",
-      "скам", "hack", "exploit", "rug pull"), "🚨"),
+      "скам", "hack", "exploit", "rug pull"), ["🚨", "🔓", "🕵️", "🛡️"]),
     (("упал", "упад", "падени", "обвал", "просел", "подешевел", "снизил", "рухнул", "рухнули",
-      "минимум", "plunge", "crash", "drops"), "📉"),
+      "минимум", "plunge", "crash", "drops"), ["📉", "🔻", "🧊", "⬇️"]),
     (("вырос", "вырастет", "подорожал", "рекорд", "ралли", "взлет", "взлёт", "растёт", "растет",
-      " рост ", "surge", "rally", "all-time high"), "📈"),
-    (("etf", "blackrock", "фонд ", "институционал", "инвестор", "центробанк", " цб "), "🏦"),
-    (("binance", "coinbase", "bybit", "okx", "kraken", "биржа", "биржи", "листинг", "делистинг"), "🏷️"),
-    (("биткоин", "bitcoin", " btc", "эфир", "ethereum", " eth ", "солана", "solana", "xrp", "ripple",
-      "токен", "альткоин", "стейблкоин", "stablecoin", "usdt", "usdc", "крипт", "блокчейн",
-      "майнинг", "майнер", "defi", "nft", "мем-коин", "memecoin"), "🪙"),
+      " рост ", "surge", "rally", "all time high"), ["📈", "🚀", "🔺", "🔥"]),
+    (("etf", "blackrock", "фонд ", "институционал", "инвестор", "центробанк", " цб "), ["🏦", "💼", "🏢"]),
+    (("binance", "coinbase", "bybit", "okx", "kraken", "биржа", "биржи", "листинг", "делистинг"),
+     ["🏷️", "🔁", "📋"]),
+    (("whale", " кит ", " киты ", " китов ", " кита "), ["🐋"]),
+    (("биткоин", "bitcoin", " btc "), ["₿", "🪙", "🟠"]),
+    (("эфир ", "эфира", "эфириум", "ethereum", " eth "), ["💠", "🪙", "🔷"]),
+    (("стейблкоин", "stablecoin", " usdt ", " usdc ", "tether"), ["💵", "💲", "🪙"]),
+    (("solana", "солана", "xrp", "ripple", "токен", "альткоин", "крипт", "блокчейн", "memecoin",
+      "мем коин", "мемкоин"), ["🪙", "💎", "🧬", "🔗"]),
+    (("defi", "стейкинг", "staking", "ликвидност"), ["🌾", "🔒", "🏗️"]),
+    (("майнинг", "майнер", "хешрейт", "халвинг"), ["⛏️", "🔋", "🖥️"]),
+    (("nft", "нфт"), ["🖼️", "🎨", "🖌️"]),
+    (("airdrop", "аирдроп", "эирдроп"), ["🎁", "🪂", "🎉"]),
+    (("kalshi", "polymarket", "рынки предсказаний", "рынков предсказаний"), ["🎲", "🔮", "🗳️"]),
+    (("нейросет", "искусственн", " ии ", "chatgpt", "openai", "claude", "anthropic", "gemini", "grok",
+      "deepseek", " llm ", " ai ", "gpt", "агента ", "агент ", "агенты ", "агентов ", "робот"),
+     ["🤖", "🧠", "🦾", "✨"]),
+    (("telegram", "телеграм", "дуров", " ton ", "toncoin"), ["📲", "✈️", "💬"]),
+    (("партнерств", "партнёрств", "сотрудничеств", "альянс", "объединя"), ["🤝", "🔗"]),
+    (("инвестиц", "раунд", "привлек", "млрд", "венчур"), ["💰", "💸", "🏦"]),
+    (("конференц", "саммит", "форум", "митап"), ["🎤", "🗓️", "🏟️"]),
+    (("запустил", "запуск", "представил", "анонсир", "релиз", "обновлен", "выпустил"),
+     ["🚀", "🆕", "🛠️", "🎉"]),
+    ((" игр", "gamefi", "геймин", "gaming"), ["🎮", "🕹️", "👾"]),
     # --- общие темы ---
-    (("война", "обстрел", "армия", "военн", "ракет", "war ", "military", "missile"), "🪖"),
-    (("выбор", "президент", "правительств", "парламент", "санкци", "election", "president"), "🏛️"),
-    (("нейросет", "искусственн", " ии ", "chatgpt", "openai", "claude", " ai ", "gpt"), "🤖"),
-    (("смартфон", "iphone", "android", "apple", "google", "microsoft", "процессор", "чип", "ноутбук"), "💻"),
-    (("космос", "nasa", "спутник", "ракета-носитель", "марс", "луна", "spacex"), "🚀"),
-    (("доллар", "евро", "рубл", "курс", "инфляц", "банк", "акци", "биржа", "рынок", "нефть", "экономик"), "💰"),
-    (("крипт", "биткоин", "bitcoin", "ethereum", "блокчейн"), "🪙"),
-    (("футбол", "хоккей", "теннис", "олимпи", "спорт", "матч", "чемпионат", "уефа", "нба", "uefa"), "⚽"),
-    (("учён", "ученые", "учёные", "исследовани", "открыти", "science", "study"), "🔬"),
-    (("климат", "погода", "шторм", "землетряс", "наводнен", "пожар", "ураган", "earthquake"), "🌪️"),
-    (("здоровь", "вирус", "врач", "болезн", "вакцин", "медицин", "health", "covid"), "🩺"),
-    (("авиа", "самолёт", "самолет", "аэропорт", "поезд", "дтп", "авария", "катастроф"), "✈️"),
-    (("кино", "фильм", "сериал", "музык", "концерт", "премьер", "оскар"), "🎬"),
+    (("война", "обстрел", "армия", "военн", "ракет", " war ", "military", "missile"), ["🪖", "💣", "🛡️"]),
+    ((" выбор", "президент", "правительств", "парламент", "санкци", "election", "president"),
+     ["🏛️", "🗳️", "📜"]),
+    (("смартфон", "iphone", "android", "apple", "google", "microsoft", "процессор", " чип", "ноутбук"),
+     ["💻", "📱", "🖥️"]),
+    (("космос", "nasa", "спутник", "ракета носитель", "spacex"), ["🚀", "🛰️", "🌌"]),
+    (("доллар", "евро", "рубл", "курс", "инфляц", "банк", " акци", "рынок", "нефть", "экономик"),
+     ["💰", "💱", "💹"]),
+    (("футбол", "хоккей", "теннис", "олимпи", " спорт", "матч", "чемпионат", "уефа", " нба ", "uefa"),
+     ["⚽", "🏆", "🥇"]),
+    (("учён", "ученые", "учёные", "исследовани", "открыти", "science", "study"), ["🔬", "🧪", "🔭"]),
+    (("климат", "погода", "шторм", "землетряс", "наводнен", "пожар", "ураган", "earthquake"),
+     ["🌪️", "🌊", "🔥"]),
+    (("здоровь", "вирус", "врач", "болезн", "вакцин", "медицин", "health", "covid"), ["🩺", "💊", "🧬"]),
+    (("авиа", "самолёт", "самолет", "аэропорт", "поезд", "дтп", "авария", "катастроф"), ["✈️", "🚆", "🚗"]),
+    ((" кино ", "фильм", "сериал", "музык", "концерт", "премьера", "оскар"), ["🎬", "🎵", "🍿"]),
 ]
-DEFAULT_EMOJI = "📰"
+
+# Запасной набор: берётся, когда все подходящие по теме эмодзи недавно уже были.
+# Должен быть заметно больше EMOJI_NO_REPEAT, чтобы свободное эмодзи находилось всегда.
+GENERAL_EMOJI = [
+    "🌐", "💡", "⚡", "📌", "🔔", "🧩", "📰", "🔥", "🎯", "🧭", "🛰️", "🔎", "📡", "🗞️", "🧠",
+    "🌍", "🔮", "🎲", "🏁", "🛡️", "🧱", "⚙️", "🔗", "📣", "🗂️", "🪄", "🧪", "🔭", "⏳", "🌟",
+    "🎛️", "🛠️", "💬", "🏆", "🪙", "🚀", "🧲", "🪐", "🎈", "🧨",
+]
 
 # Фразы, которые не считаются при подборе хештегов (иначе «прямой эфир» дал бы #ethereum).
 HASHTAG_IGNORE = ["прямой эфир", "прямого эфира", "прямом эфире", "в эфире", "в эфир"]
@@ -119,6 +154,10 @@ HASHTAG_RULES = [
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.execute("CREATE TABLE IF NOT EXISTS posted (url TEXT PRIMARY KEY, title TEXT, ts INTEGER)")
+    # Старая база (без колонки emoji) дополняется на месте, прошлые посты остаются.
+    if "emoji" not in {row[1] for row in conn.execute("PRAGMA table_info(posted)")}:
+        conn.execute("ALTER TABLE posted ADD COLUMN emoji TEXT")
+        conn.commit()
     return conn
 
 
@@ -127,12 +166,21 @@ def already_posted(url: str) -> bool:
         return conn.execute("SELECT 1 FROM posted WHERE url = ?", (url,)).fetchone() is not None
 
 
-def mark_posted(url: str, title: str) -> None:
+def mark_posted(url: str, title: str, emoji: str = "") -> None:
     with db() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO posted (url, title, ts) VALUES (?, ?, ?)",
-            (url, title, int(time.time())),
+            "INSERT OR IGNORE INTO posted (url, title, ts, emoji) VALUES (?, ?, ?, ?)",
+            (url, title, int(time.time()), emoji),
         )
+
+
+def recent_emojis(limit: int = EMOJI_NO_REPEAT) -> set[str]:
+    """Эмодзи последних постов (их повторять нельзя)."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT emoji FROM posted ORDER BY ts DESC, rowid DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return {r[0] for r in rows if r[0]}
 
 
 # ---------- чтение лент ----------
@@ -293,12 +341,17 @@ def pick_items(feeds: list[str]) -> list[dict]:
 
 
 # ---------- оформление и отправка ----------
-def pick_emoji(title: str) -> str:
-    low = f" {title.lower()} "
-    for keys, emoji in EMOJI_RULES:
-        if any(k in low for k in keys):
+def pick_emoji(title: str, avoid: set[str] | frozenset = frozenset()) -> str:
+    """Эмодзи по теме заголовка, но не из набора avoid (использованные недавно)."""
+    low = " " + re.sub(r"[\W_]+", " ", title.lower()) + " "  # «ИИ-агента» -> « ии агента »
+    for phrase in HASHTAG_IGNORE:  # «прямой эфир» — не про Ethereum
+        low = low.replace(" " + phrase + " ", " ")
+    candidates = [e for keys, emojis in EMOJI_RULES if any(k in low for k in keys) for e in emojis]
+    for emoji in candidates:  # порядок правил = порядок важности темы
+        if emoji not in avoid:
             return emoji
-    return DEFAULT_EMOJI
+    free = [e for e in GENERAL_EMOJI if e not in avoid] or GENERAL_EMOJI
+    return free[zlib.crc32(title.encode("utf-8")) % len(free)]
 
 
 def _norm(text: str) -> str:
@@ -346,7 +399,8 @@ def format_post(item: dict) -> str:
     if summary.lower().startswith(item["title"].lower()[:40]):
         summary = ""
     body = html.escape(shorten(summary, MAX_CHARS)) if summary else ""
-    parts = [f"{pick_emoji(item['title'])} <b>{title}</b>"]
+    emoji = html.escape(item.get("emoji") or pick_emoji(item["title"]))
+    parts = [f"{emoji} <b>{title}</b>"]
     if body:
         parts.append(body)
     tags = pick_hashtags(item)
@@ -377,15 +431,18 @@ def run_once() -> None:
     if not items:
         log.info("Новых новостей нет, публиковать нечего")
         return
+    avoid = recent_emojis()  # эмодзи последних постов; в этом запуске пополняется
     for n, item in enumerate(items):
+        item["emoji"] = pick_emoji(item["title"], avoid)
+        avoid.add(item["emoji"])
         message = format_post(item)
         if DRY_RUN:
             print("-" * 40)
             print(message)
             continue
         send_to_telegram(message)
-        mark_posted(item["url"], item["title"])
-        log.info("Опубликовано: %s", item["title"])
+        mark_posted(item["url"], item["title"], item["emoji"])
+        log.info("Опубликовано: %s %s", item["emoji"], item["title"])
         if n < len(items) - 1:
             time.sleep(3)
     if DRY_RUN:

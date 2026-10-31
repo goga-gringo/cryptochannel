@@ -466,7 +466,7 @@ def rates_block() -> str:
     lines = [f"{name} ≈ {fmt_price(prices[name])}$" for name, _, _ in RATE_COINS if name in prices]
     if not lines:
         return ""  # курсов нет совсем: пост выходит без блока, а не падает
-    return "<b>Курсы:</b>\n\n<b>" + "</b>\n<b>".join(lines) + "</b>"
+    return "📊 <b>Курсы:</b>\n\n<b>" + "</b>\n<b>".join(lines) + "</b>"
 
 
 def format_post(item: dict) -> str:

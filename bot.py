@@ -406,6 +406,69 @@ def pick_hashtags(item: dict) -> list[str]:
     return tags
 
 
+# ---- Курсы монет ----
+SHOW_RATES = env("SHOW_RATES", "1") != "0"
+# (название в посте, id в CoinGecko, id в CoinPaprika)
+RATE_COINS = [
+    ("Bitcoin", "bitcoin", "btc-bitcoin"),
+    ("Gram", "the-open-network", "ton-toncoin"),
+    ("Monero", "monero", "xmr-monero"),
+    ("Ethereum", "ethereum", "eth-ethereum"),
+    ("Solana", "solana", "sol-solana"),
+]
+
+
+def _get_json(url: str):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 news-bot", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.load(resp)
+
+
+def fmt_price(p: float) -> str:
+    if p >= 1000:
+        return f"{round(p):d}"
+    if p >= 100:
+        return f"{p:.0f}"
+    if p >= 1:
+        return f"{p:.2f}"
+    return f"{p:.4f}"
+
+
+def fetch_rates() -> dict:
+    """Курсы в долларах. Сначала CoinGecko, недостающее добираем из CoinPaprika."""
+    prices: dict = {}
+    try:
+        ids = ",".join(c[1] for c in RATE_COINS)
+        data = _get_json(f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd")
+        for name, cg, _ in RATE_COINS:
+            v = (data.get(cg) or {}).get("usd")
+            if v:
+                prices[name] = float(v)
+    except (OSError, ValueError) as e:
+        logging.warning("CoinGecko не ответил: %s", e)
+    for name, _, cp in RATE_COINS:
+        if name in prices:
+            continue
+        try:
+            data = _get_json(f"https://api.coinpaprika.com/v1/tickers/{cp}")
+            v = data["quotes"]["USD"]["price"]
+            if v:
+                prices[name] = float(v)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logging.warning("CoinPaprika не дал курс %s: %s", name, e)
+    return prices
+
+
+def rates_block() -> str:
+    if not SHOW_RATES:
+        return ""
+    prices = fetch_rates()
+    lines = [f"{name} ≈ {fmt_price(prices[name])}$" for name, _, _ in RATE_COINS if name in prices]
+    if not lines:
+        return ""  # курсов нет совсем: пост выходит без блока, а не падает
+    return "<b>Курсы:</b>\n\n<b>" + "</b>\n<b>".join(lines) + "</b>"
+
+
 def format_post(item: dict) -> str:
     title = html.escape(item["title"])
     summary = item["summary"]
@@ -417,6 +480,9 @@ def format_post(item: dict) -> str:
     parts = [f"{emoji} <b>{title}</b>"]
     if body:
         parts.append(body)
+    rates = rates_block()
+    if rates:
+        parts.append(rates)
     tags = pick_hashtags(item)
     if tags:
         parts.append(html.escape(" ".join(tags)))

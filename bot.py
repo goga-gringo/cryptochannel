@@ -207,6 +207,22 @@ def clean_text(raw: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# Подписи к картинкам из лент: «Источник изображения: ...», «Фото: ...» и т.п. В пост не нужны.
+CREDIT_RE = re.compile(
+    r"(?:источник\s+(?:изображени\w+|фото\w*|картинк\w+|иллюстраци\w+|обложк\w+|кадр\w*)"
+    r"|(?:изображени\w+|фото(?:граф\w+)?|иллюстраци\w+|картинк\w+|кадр|скриншот\w*|обложк\w+)\s*:"
+    r"|image\s+(?:source|credit)|photo\s+credit|credits?\s*:|photo\s*:|image\s*:)"
+    r".{0,200}?(?=(?<=[.!?])\s+(?-i:[A-ZА-ЯЁ])|$)",
+    re.I,
+)
+
+
+def strip_credits(text: str) -> str:
+    text = CREDIT_RE.sub(" ", text)
+    return re.sub(r"\\s+", " ", text).strip()
+
+
+
 def shorten(text: str, limit: int) -> str:
     """Обрезает текст по границе предложения (или слова), не длиннее limit символов."""
     if len(text) <= limit:
@@ -243,7 +259,7 @@ def fetch_feed(url: str) -> list[dict]:
         title = clean_text(e.get("title", ""))
         if not link or not title:
             continue
-        summary = clean_text(e.get("summary") or e.get("description") or "")
+        summary = strip_credits(clean_text(e.get("summary") or e.get("description") or ""))
         if "news.google.com" in url:
             # Заголовки там вида «Текст - Название издания», а описание — только ссылки.
             title = re.sub(r"\s+[-–—]\s+[^-–—]{2,60}$", "", title)

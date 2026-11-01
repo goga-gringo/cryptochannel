@@ -475,9 +475,21 @@ def fetch_rates() -> dict:
     return prices
 
 
-def rates_block() -> str:
+TZ_OFFSET_HOURS = int(env("TZ_OFFSET_HOURS", "5"))  # Екатеринбург = UTC+5; границу «сегодня» считаем по нему
+
+
+def rates_due() -> bool:
+    """Курсы нужны только в первом посте за календарный день (по местному времени)."""
     if not SHOW_RATES:
-        return ""
+        return False
+    now = time.time() + TZ_OFFSET_HOURS * 3600
+    day_start = int(now - now % 86400 - TZ_OFFSET_HOURS * 3600)  # полночь по местному времени, в UTC-секундах
+    with db() as conn:
+        row = conn.execute("SELECT 1 FROM posted WHERE ts >= ? LIMIT 1", (day_start,)).fetchone()
+    return row is None
+
+
+def rates_block() -> str:
     prices = fetch_rates()
     lines = [f"{name} ≈ {fmt_price(prices[name])}$" for name, _, _ in RATE_COINS if name in prices]
     if not lines:
@@ -485,7 +497,7 @@ def rates_block() -> str:
     return "📊 <b>Курсы:</b>\n\n<b>" + "</b>\n<b>".join(lines) + "</b>"
 
 
-def format_post(item: dict) -> str:
+def format_post(item: dict, with_rates: bool = False) -> str:
     title = html.escape(item["title"])
     summary = item["summary"]
     # Некоторые ленты дублируют заголовок в описании, такое не показываем.
@@ -496,7 +508,7 @@ def format_post(item: dict) -> str:
     parts = [f"{emoji} <b>{title}</b>"]
     if body:
         parts.append(body)
-    rates = rates_block()
+    rates = rates_block() if with_rates else ""
     if rates:
         parts.append(rates)
     tags = pick_hashtags(item)
@@ -528,10 +540,11 @@ def run_once() -> None:
         log.info("Новых новостей нет, публиковать нечего")
         return
     avoid = recent_emojis()  # эмодзи последних постов; в этом запуске пополняется
+    want_rates = rates_due()  # курсы только в первом посте дня
     for n, item in enumerate(items):
         item["emoji"] = pick_emoji(item["title"], avoid)
         avoid.add(item["emoji"])
-        message = format_post(item)
+        message = format_post(item, with_rates=want_rates and n == 0)
         if DRY_RUN:
             print("-" * 40)
             print(message)

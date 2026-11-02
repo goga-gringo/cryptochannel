@@ -39,7 +39,7 @@ DRY_RUN = env("DRY_RUN", "0") == "1"  # 1 = только показать пос
 # Хештеги в конце поста: подбираются по теме новости (правила ниже, HASHTAG_RULES).
 MAX_HASHTAGS = 4  # сколько хештегов ставить под постом; 0 отключает их совсем
 ALWAYS_TAG = "#crypto"  # ставится первым в каждом посте ("" = не ставить)
-FALLBACK_TAGS = ["#bitcoin", "#altcoin", "#telegram", "#blockchain"]  # добирают до нужного числа
+FALLBACK_TAGS = ["#bitcoin", "#altcoin", "#blockchain", "#web3", "#cryptonews", "#trading", "#defi", "#investing", "#btc", "#news"]  # добирают до нужного числа
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("news_bot")
@@ -322,6 +322,43 @@ def recent_entities() -> set[str]:
     return names
 
 
+# ---------- отбор по теме: только крипта, в приоритете Telegram / TON / Gram ----------
+CRYPTO_WORDS = (
+    "крипт", "биткоин", "bitcoin", "btc", "эфир", "ethereum", "eth", "блокчейн", "blockchain",
+    "токен", "token", "майнинг", "майнер", "халвинг", "binance", "бинанс", "coinbase", "bybit", "okx",
+    "kraken", "kucoin", "bitget", "стейблкоин", "stablecoin", "usdt", "usdc", "tether", "defi", "nft", "нфт",
+    "web3", "веб3", "альткоин", "altcoin", "solana", "солана", "xrp", "ripple", "рипл", "cardano", "кардано",
+    "dogecoin", "doge", "мемкоин", "мем коин", "memecoin", "airdrop", "аирдроп", "эирдроп", "стейкинг",
+    "staking", "cbdc", "цифровой рубль", "цифровая валюта", "kalshi", "polymarket", "рынки предсказаний",
+    "рынков предсказаний", "кошелек", "кошелёк", "wallet", "ton", "toncoin", "тонкоин", "gram", "грам",
+    "telegram", "телеграм", "дуров", "etf", "blackrock", "grayscale", "грейскейл", "ликвидност", "хешрейт",
+    "децентрализован", "dao", "layer 2", "rollup", "bnb", "metamask", "ledger", "trump coin", "world liberty",
+)
+TON_WORDS = ("ton", "toncoin", "тонкоин", "gram", "грам", "telegram", "телеграм", "дуров", "durov", "tonkeeper")
+TON_MAX_IN_ROW = int(env("TON_MAX_IN_ROW", "2"))  # сколько постов про Telegram/TON подряд, потом один про остальную крипту
+
+
+def _has_any(text: str, words) -> bool:
+    n = _norm(text)
+    # короткие слова ищем как целые слова, длинные как начало слова
+    return any((" " + w + " " in n) if len(w) <= 4 else (" " + w in n) for w in words)
+
+
+def is_crypto(item: dict) -> bool:
+    return _has_any(item["title"] + " " + item.get("summary", "")[:600], CRYPTO_WORDS)
+
+
+def is_ton_topic(text: str) -> bool:
+    return _has_any(text, TON_WORDS)
+
+
+def prefer_ton_now() -> bool:
+    """Telegram/TON/Gram в приоритете, но не больше TON_MAX_IN_ROW постов подряд."""
+    with db() as conn:
+        rows = conn.execute("SELECT title FROM posted ORDER BY ts DESC LIMIT ?", (TON_MAX_IN_ROW,)).fetchall()
+    return not (len(rows) >= TON_MAX_IN_ROW and all(is_ton_topic(r[0] or "") for r in rows))
+
+
 def pick_items(feeds: list[str]) -> list[dict]:
     """Берёт самые свежие ещё не опубликованные новости, по очереди из разных лент."""
     now = time.time()
@@ -332,6 +369,7 @@ def pick_items(feeds: list[str]) -> list[dict]:
             for i in fetch_feed(url)
             if not already_posted(i["url"])
             and (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600)
+            and is_crypto(i)  # новости не про крипту (наука, ИИ, гаджеты) пропускаем
         ]
         per_feed.append(fresh)
     # Начинаем с другой ленты каждый раз (по числу уже опубликованных постов), иначе при
@@ -341,6 +379,14 @@ def pick_items(feeds: list[str]) -> list[dict]:
             posted_count = conn.execute("SELECT COUNT(*) FROM posted").fetchone()[0]
         start = posted_count % len(per_feed)
         per_feed = per_feed[start:] + per_feed[:start]
+    # Приоритет темы: сейчас вперёд идут новости про Telegram/TON/Gram (но не больше
+    # TON_MAX_IN_ROW подряд), иначе вперёд идёт остальная крипта.
+    want_ton = prefer_ton_now()
+    def rank(i):
+        return 0 if is_ton_topic(i["title"] + " " + i.get("summary", "")[:300]) == want_ton else 1
+    per_feed = [sorted(lst, key=rank) for lst in per_feed]
+    per_feed.sort(key=lambda lst: rank(lst[0]) if lst else 2)
+    log.info("Приоритет сейчас: %s", "Telegram/TON/Gram" if want_ton else "остальная крипта")
     # Та же новость из другой ленты (совпадает заголовок) не публикуется повторно.
     # Новости про ту же компанию/проект, что в последних постах, откладываются: берутся
     # другие, а отложенные идут в дело, только если ничего другого нет.
@@ -417,8 +463,10 @@ def pick_hashtags(item: dict) -> list[str]:
         for rule_tags in matched:
             if position < len(rule_tags):
                 add(rule_tags[position])
-    for tag in FALLBACK_TAGS:
-        add(tag)
+    # Добор: набор и порядок зависят от новости, поэтому хештеги не одинаковы в каждом посте.
+    start = zlib.crc32(item["title"].encode("utf-8")) % len(FALLBACK_TAGS)
+    for n in range(len(FALLBACK_TAGS)):
+        add(FALLBACK_TAGS[(start + n * 3) % len(FALLBACK_TAGS)])
     return tags
 
 

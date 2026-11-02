@@ -1,10 +1,7 @@
 name: Daily news post
 
 on:
-  schedule:
-    # ВРЕМЯ ЗДЕСЬ ПО UTC, Екатеринбург = UTC+5 (UTC = местное время минус 5 часов).
-    # Три раза в сутки: 05:07, 10:07, 15:07 UTC = 10:07, 15:07, 20:07 по Екатеринбургу.
-    - cron: "7 5,10,15 * * *"
+  # Расписание GitHub отключено: запуски по времени делает cron-job.org через workflow_dispatch.
   workflow_dispatch: # кнопка ручного запуска во вкладке Actions
     inputs:
       dry_run:

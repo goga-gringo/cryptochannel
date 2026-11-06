@@ -256,10 +256,10 @@ def fetch_feed(url: str) -> list[dict]:
     items = []
     for e in parsed.entries:
         link = (e.get("link") or "").strip()
-        title = clean_text(e.get("title", ""))
+        title = re.sub(r"(?<=[^\W\d_])\*+", "", clean_text(e.get("title", "")))  # звёздочки-пометки СМИ у имён
         if not link or not title:
             continue
-        summary = strip_credits(clean_text(e.get("summary") or e.get("description") or ""))
+        summary = re.sub(r"(?<=[^\W\d_])\*+", "", strip_credits(clean_text(e.get("summary") or e.get("description") or "")))
         if "news.google.com" in url:
             # Заголовки там вида «Текст - Название издания», а описание — только ссылки.
             title = re.sub(r"\s+[-–—]\s+[^-–—]{2,60}$", "", title)
@@ -348,11 +348,33 @@ def _has_any(text: str, words) -> bool:
 # Свои слова можно добавить через переменную BLOCK_WORDS на GitHub, через запятую.
 BLOCK_WORDS = ["украин", "ukrain", "киев", "киеве", "киева", "kyiv", "kiev", "зеленск", "zelensk",
                "донбасс", "донецк", "луганск", "херсон", "харьков", "всу"]
+# Светская хроника и личная жизнь знаменитостей (Бутерин и др.) в канале не нужна.
+# Но если в заголовке Дуров, Telegram, TON или Gram, подходят любые новости (см. is_blocked).
+GOSSIP_WORDS = ["спутниц", "любовниц", "невест", "свадьб", "личной жизни", "личная жизнь", "наследник",
+                "отцовств", "жена", "жены", "девушк", "роман с"]
 BLOCK_WORDS += [w.strip().lower() for w in env("BLOCK_WORDS", "").split(",") if w.strip()]
 
 
+SOFT_WORDS = ("telegram", "телеграм", "дуров", "durov")  # имя само по себе ещё не значит «про крипту»
+HARD_WORDS = tuple(w for w in CRYPTO_WORDS if w not in SOFT_WORDS)
+MIN_BODY_CHARS = int(env("MIN_BODY_CHARS", "80"))
+
+
+def is_substantial(item: dict) -> bool:
+    """Пост без текста (у Google News описания нет) допускается, если заголовок явно про
+    крипту или про Дурова, Telegram, TON, Gram (по этим темам берём любые новости)."""
+    if len(item.get("summary", "")) >= MIN_BODY_CHARS:
+        return True
+    return _has_any(item["title"], HARD_WORDS) or is_ton_topic(item["title"])
+
+
 def is_blocked(item: dict) -> bool:
-    return _has_any(item["title"] + " " + item.get("summary", ""), BLOCK_WORDS)
+    text = item["title"] + " " + item.get("summary", "")
+    if _has_any(text, BLOCK_WORDS):  # Украина и т. п.: отсекаем всегда
+        return True
+    if is_ton_topic(item["title"]):  # Дуров/Telegram/TON/Gram в заголовке: светская хроника допустима
+        return False
+    return _has_any(text, GOSSIP_WORDS)
 
 
 def is_crypto(item: dict) -> bool:
@@ -381,6 +403,7 @@ def pick_items(feeds: list[str]) -> list[dict]:
             if not already_posted(i["url"])
             and (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600)
             and not is_blocked(i)
+            and is_substantial(i)
             and is_crypto(i)  # новости не про крипту (наука, ИИ, гаджеты) пропускаем
         ]
         per_feed.append(fresh)

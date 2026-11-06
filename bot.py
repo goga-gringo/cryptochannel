@@ -344,6 +344,17 @@ def _has_any(text: str, words) -> bool:
     return any((" " + w + " " in n) if len(w) <= 4 else (" " + w in n) for w in words)
 
 
+# Темы, которые не публикуем вообще (любое упоминание в заголовке или описании).
+# Свои слова можно добавить через переменную BLOCK_WORDS на GitHub, через запятую.
+BLOCK_WORDS = ["украин", "ukrain", "киев", "киеве", "киева", "kyiv", "kiev", "зеленск", "zelensk",
+               "донбасс", "донецк", "луганск", "херсон", "харьков", "всу"]
+BLOCK_WORDS += [w.strip().lower() for w in env("BLOCK_WORDS", "").split(",") if w.strip()]
+
+
+def is_blocked(item: dict) -> bool:
+    return _has_any(item["title"] + " " + item.get("summary", ""), BLOCK_WORDS)
+
+
 def is_crypto(item: dict) -> bool:
     return _has_any(item["title"] + " " + item.get("summary", "")[:600], CRYPTO_WORDS)
 
@@ -369,6 +380,7 @@ def pick_items(feeds: list[str]) -> list[dict]:
             for i in fetch_feed(url)
             if not already_posted(i["url"])
             and (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600)
+            and not is_blocked(i)
             and is_crypto(i)  # новости не про крипту (наука, ИИ, гаджеты) пропускаем
         ]
         per_feed.append(fresh)

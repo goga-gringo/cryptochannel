@@ -219,7 +219,7 @@ CREDIT_RE = re.compile(
 
 def strip_credits(text: str) -> str:
     text = CREDIT_RE.sub(" ", text)
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 
@@ -357,19 +357,25 @@ BLOCK_WORDS += [w.strip().lower() for w in env("BLOCK_WORDS", "").split(",") if 
 
 SOFT_WORDS = ("telegram", "телеграм", "дуров", "durov")  # имя само по себе ещё не значит «про крипту»
 HARD_WORDS = tuple(w for w in CRYPTO_WORDS if w not in SOFT_WORDS)
-MIN_BODY_CHARS = int(env("MIN_BODY_CHARS", "80"))
+MIN_BODY_CHARS = int(env("MIN_BODY_CHARS", "200"))
 
 
 def is_substantial(item: dict) -> bool:
-    """Пост без текста (у Google News описания нет) допускается, если заголовок явно про
-    крипту или про Дурова, Telegram, TON, Gram (по этим темам берём любые новости)."""
-    if len(item.get("summary", "")) >= MIN_BODY_CHARS:
-        return True
-    return _has_any(item["title"], HARD_WORDS) or is_ton_topic(item["title"])
+    """Нужен текст новости не короче MIN_BODY_CHARS символов. Одни заголовки (у Google Новостей
+    описаний нет) не публикуем, даже про Дурова: из них не понятно, о чём новость."""
+    return len(item.get("summary", "")) >= MIN_BODY_CHARS
+
+
+# Не новости: анонсы подкастов и эфиров, рекламные материалы, «текстовые версии» передач.
+NON_NEWS_WORDS = ["текстовая версия", "текстовую версию", "деконструкц", "подкаст", "podcast", "вебинар",
+                  "прямой эфир", "прямом эфире", "стрим", "на правах рекламы", "партнерский материал",
+                  "партнёрский материал", "промокод", "рекламный материал", "розыгрыш"]
 
 
 def is_blocked(item: dict) -> bool:
     text = item["title"] + " " + item.get("summary", "")
+    if _has_any(text, NON_NEWS_WORDS):
+        return True
     if _has_any(text, BLOCK_WORDS):  # Украина и т. п.: отсекаем всегда
         return True
     if is_ton_topic(item["title"]):  # Дуров/Telegram/TON/Gram в заголовке: светская хроника допустима
@@ -397,15 +403,20 @@ def pick_items(feeds: list[str]) -> list[dict]:
     now = time.time()
     per_feed = []
     for url in feeds:
-        fresh = [
-            i
-            for i in fetch_feed(url)
-            if not already_posted(i["url"])
-            and (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600)
-            and not is_blocked(i)
-            and is_substantial(i)
-            and is_crypto(i)  # новости не про крипту (наука, ИИ, гаджеты) пропускаем
-        ]
+        fresh = []
+        stats = {"уже было/старые": 0, "стоп-слова": 0, "короткий текст": 0, "не про крипту": 0}
+        for i in fetch_feed(url):
+            if already_posted(i["url"]) or not (i["ts"] is None or now - i["ts"] <= MAX_AGE_HOURS * 3600):
+                stats["уже было/старые"] += 1
+            elif is_blocked(i):
+                stats["стоп-слова"] += 1
+            elif not is_substantial(i):
+                stats["короткий текст"] += 1
+            elif not is_crypto(i):  # новости не про крипту (наука, ИИ, гаджеты) пропускаем
+                stats["не про крипту"] += 1
+            else:
+                fresh.append(i)
+        log.info("  подошло %d; отсеяно: %s", len(fresh), ", ".join(f"{k} {v}" for k, v in stats.items()))
         per_feed.append(fresh)
     # Начинаем с другой ленты каждый раз (по числу уже опубликованных постов), иначе при
     # одном посте в сутки всегда выигрывала бы первая лента списка.
@@ -634,7 +645,7 @@ def run_once() -> None:
             continue
         send_to_telegram(message)
         mark_posted(item["url"], item["title"], item["emoji"])
-        log.info("Опубликовано: %s %s", item["emoji"], item["title"])
+        log.info("Опубликовано: %s %s (текст %d симв.)", item["emoji"], item["title"], len(item.get("summary", "")))
         if n < len(items) - 1:
             time.sleep(3)
     if DRY_RUN:

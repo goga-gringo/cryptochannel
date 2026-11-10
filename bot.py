@@ -311,6 +311,23 @@ def entities(title: str) -> set[str]:
     return names
 
 
+def sig_stems(title: str) -> set[str]:
+    """Значимые слова заголовка (не короче 5 букв, не из общих), по первым 5 буквам.
+    Нужны, чтобы узнать одну новость, пересказанную в разных лентах разными словами."""
+    words = re.findall(r"[A-Za-zА-Яа-яЁё0-9]{5,}", title.lower())
+    return {w[:5] for w in words if w[:5] not in GENERIC_STEMS}
+
+
+SIMILAR_LOOKBACK = 12  # с каким числом последних постов сравниваем заголовки
+SIMILAR_MIN_SHARED = 2  # сколько общих значимых слов делает две новости «одной и той же»
+
+
+def recent_titles(limit: int = SIMILAR_LOOKBACK) -> list[set[str]]:
+    with db() as conn:
+        rows = conn.execute("SELECT title FROM posted ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    return [sig_stems(r[0] or "") for r in rows]
+
+
 def recent_entities() -> set[str]:
     with db() as conn:
         rows = conn.execute(
@@ -438,6 +455,7 @@ def pick_items(feeds: list[str]) -> list[dict]:
     # другие, а отложенные идут в дело, только если ничего другого нет.
     result, seen_titles = [], posted_title_keys()
     recent_names = recent_entities()
+    recent_stems = recent_titles()
     deferred = []
     while len(result) < POSTS_PER_RUN and any(per_feed):
         for lst in per_feed:
@@ -448,10 +466,13 @@ def pick_items(feeds: list[str]) -> list[dict]:
                     continue
                 seen_titles.add(key)
                 names = entities(item["title"])
-                if names & recent_names:
+                stems = sig_stems(item["title"])
+                same_story = any(len(stems & old) >= SIMILAR_MIN_SHARED for old in recent_stems)
+                if names & recent_names or same_story:
                     deferred.append(item)
                     continue
                 recent_names |= names
+                recent_stems.append(stems)  # две похожие новости не уйдут в один запуск
                 result.append(item)
                 break
             if len(result) >= POSTS_PER_RUN:
